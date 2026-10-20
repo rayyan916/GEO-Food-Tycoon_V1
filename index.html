@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>糧食大亨：生存與繁榮</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;700&display=swap');
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f4f1ea; /* Earthy background */
+            color: #2d3748;
+            overflow-x: hidden;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        #map-container svg {
+            width: 100%;
+            height: 100%;
+        }
+        .country {
+            fill: #cbd5e0;
+            stroke: #ffffff;
+            stroke-width: 0.5;
+            transition: fill 0.3s;
+        }
+        .country.active {
+            fill: #48bb78;
+            stroke: #22543d;
+            stroke-width: 1.5;
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #edf2f7; }
+        ::-webkit-scrollbar-thumb { background: #a0aec0; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #718096; }
+
+        .log-entry { animation: fadeIn 0.5s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .modal-overlay {
+            background-color: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col">
+
+    <!-- Top Status Bar -->
+    <header class="bg-green-800 text-white p-4 shadow-md z-10 flex flex-wrap justify-between items-center">
+        <div class="flex items-center space-x-2">
+            <i class="fa-solid fa-wheat-awn text-2xl text-yellow-400"></i>
+            <h1 class="text-xl font-bold tracking-wider">糧食大亨</h1>
+        </div>
+        <div class="flex flex-wrap gap-4 text-sm md:text-base font-semibold">
+            <div class="flex items-center gap-1 bg-green-900 px-3 py-1 rounded"><i class="fa-regular fa-calendar"></i> 日期: <span id="ui-date">2026-01-01</span></div>
+            <div class="flex items-center gap-1 bg-green-900 px-3 py-1 rounded"><i class="fa-solid fa-sack-dollar text-yellow-400"></i> 資金: $<span id="ui-money">0</span></div>
+            <div class="flex items-center gap-1 bg-green-900 px-3 py-1 rounded"><i class="fa-solid fa-bowl-rice text-white"></i> 儲糧: <span id="ui-food">0</span> 噸</div>
+            <div class="flex items-center gap-1 bg-green-900 px-3 py-1 rounded"><i class="fa-solid fa-users text-blue-300"></i> 人口/飢餓度: <span id="ui-hunger">0</span>%</div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 overflow-hidden flex flex-col md:flex-row p-2 md:p-4 gap-4">
+        
+        <!-- Left Panel: Country Info & Map -->
+        <section class="w-full md:w-1/3 flex flex-col gap-4 overflow-y-auto">
+            <!-- Map -->
+            <div class="glass-panel rounded-xl p-2 h-48 relative flex-shrink-0 flex items-center justify-center bg-blue-50">
+                <div id="map-loading" class="absolute text-gray-500 font-bold"><i class="fa-solid fa-spinner fa-spin"></i> 載入世界地圖中...</div>
+                <div id="map-container" class="w-full h-full"></div>
+            </div>
+            
+            <!-- Country Data -->
+            <div class="glass-panel rounded-xl p-4 flex-1">
+                <h2 class="text-2xl font-bold border-b-2 border-green-600 pb-2 mb-3 flex items-center gap-2">
+                    <i class="fa-solid fa-location-dot text-red-500"></i> <span id="country-name">載入中...</span>
+                </h2>
+                
+                <div class="space-y-4 text-sm">
+                    <div>
+                        <h3 class="font-bold text-green-700"><i class="fa-solid fa-cloud-sun-rain"></i> 自然條件</h3>
+                        <p id="country-natural" class="mt-1 text-gray-700 leading-relaxed"></p>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-blue-700"><i class="fa-solid fa-city"></i> 人文與經濟條件</h3>
+                        <p id="country-human" class="mt-1 text-gray-700 leading-relaxed"></p>
+                    </div>
+                    <div class="bg-gray-100 p-2 rounded border border-gray-300">
+                        <div class="flex justify-between"><span>當前市場糧價:</span> <span id="ui-price" class="font-bold text-green-600">$100/噸</span></div>
+                        <div class="flex justify-between mt-1"><span>農業科技等級:</span> <span id="ui-tech" class="font-bold text-blue-600">Lv 1</span></div>
+                        <div class="flex justify-between mt-1"><span>農田面積:</span> <span id="ui-land" class="font-bold text-yellow-600">10 公頃</span></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Panel: Actions & Event Log -->
+        <section class="w-full md:w-2/3 flex flex-col gap-4">
+            
+            <!-- Action Board -->
+            <div class="glass-panel rounded-xl p-4">
+                <h2 class="text-xl font-bold mb-3"><i class="fa-solid fa-tractor text-gray-600"></i> 農業生產選擇</h2>
+                <p class="text-xs text-gray-500 mb-4">您的決策會受限於當地的自然與人文條件。錯誤的投資可能血本無歸。</p>
+                
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    <button onclick="playerAction('plant')" class="bg-green-100 hover:bg-green-200 text-green-800 border border-green-300 p-3 rounded-lg flex flex-col items-center justify-center transition shadow-sm">
+                        <i class="fa-solid fa-seedling text-2xl mb-1"></i>
+                        <span class="font-bold text-sm">播種作物</span>
+                        <span class="text-[10px] text-gray-600 text-center">依賴天氣。投入資金與勞力。</span>
+                    </button>
+                    
+                    <button onclick="playerAction('irrigate')" class="bg-blue-100 hover:bg-blue-200 text-blue-800 border border-blue-300 p-3 rounded-lg flex flex-col items-center justify-center transition shadow-sm">
+                        <i class="fa-solid fa-water text-2xl mb-1"></i>
+                        <span class="font-bold text-sm">農業投入(灌溉/化肥)</span>
+                        <span class="text-[10px] text-gray-600 text-center">提高產量，需花費資金。</span>
+                    </button>
+                    
+                    <button onclick="playerAction('tech')" class="bg-purple-100 hover:bg-purple-200 text-purple-800 border border-purple-300 p-3 rounded-lg flex flex-col items-center justify-center transition shadow-sm">
+                        <i class="fa-solid fa-microscope text-2xl mb-1"></i>
+                        <span class="font-bold text-sm">升級農業技術</span>
+                        <span class="text-[10px] text-gray-600 text-center">高昂成本。抗災與增產。</span>
+                    </button>
+                    
+                    <button onclick="playerAction('harvest')" class="bg-yellow-100 hover:bg-yellow-200 text-yellow-800 border border-yellow-300 p-3 rounded-lg flex flex-col items-center justify-center transition shadow-sm">
+                        <i class="fa-solid fa-sickle text-2xl mb-1"></i>
+                        <span class="font-bold text-sm">進行收割</span>
+                        <span class="text-[10px] text-gray-600 text-center">將成熟作物轉為儲糧。</span>
+                    </button>
+
+                    <button onclick="playerAction('expand')" class="bg-orange-100 hover:bg-orange-200 text-orange-800 border border-orange-300 p-3 rounded-lg flex flex-col items-center justify-center transition shadow-sm">
+                        <i class="fa-solid fa-expand text-2xl mb-1"></i>
+                        <span class="font-bold text-sm">擴張/遷移農田</span>
+                        <span class="text-[10px] text-gray-600 text-center">尋找更好土地，極度耗資。</span>
+                    </button>
+
+                    <button onclick="playerAction('sell')" class="bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-300 p-3 rounded-lg flex flex-col items-center justify-center transition shadow-sm">
+                        <i class="fa-solid fa-shop text-2xl mb-1"></i>
+                        <span class="font-bold text-sm">市場銷售</span>
+                        <span class="text-[10px] text-gray-600 text-center">將儲糧換取資金(隨市場波動)。</span>
+                    </button>
+
+                    <button onclick="playerAction('corporate')" class="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 p-3 rounded-lg flex flex-col items-center justify-center transition shadow-sm">
+                        <i class="fa-solid fa-handshake text-2xl mb-1"></i>
+                        <span class="font-bold text-sm">企業合作</span>
+                        <span class="text-[10px] text-gray-600 text-center">出賣自主權換取穩定資金。</span>
+                    </button>
+
+                    <button onclick="playerAction('aid')" class="bg-red-100 hover:bg-red-200 text-red-800 border border-red-300 p-3 rounded-lg flex flex-col items-center justify-center transition shadow-sm">
+                        <i class="fa-solid fa-hand-holding-hand text-2xl mb-1"></i>
+                        <span class="font-bold text-sm">尋求政府/國際支援</span>
+                        <span class="text-[10px] text-gray-600 text-center">低開發國家較易獲取。</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Event Log -->
+            <div class="glass-panel rounded-xl p-4 flex-1 flex flex-col overflow-hidden">
+                <h2 class="text-lg font-bold mb-2 flex justify-between items-center border-b pb-2">
+                    <span><i class="fa-solid fa-scroll"></i> 遊戲日誌</span>
+                    <button onclick="togglePause()" id="btn-pause" class="text-sm bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">暫停遊戲</button>
+                </h2>
+                <div id="log-container" class="flex-1 overflow-y-auto space-y-2 p-2 bg-gray-50 rounded border inner-shadow">
+                    <!-- Logs will appear here -->
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Custom Modal -->
+    <div id="custom-modal" class="fixed inset-0 modal-overlay z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full overflow-hidden transform transition-all">
+            <div id="modal-header" class="bg-green-700 text-white p-4 font-bold text-lg flex items-center gap-2">
+                <i id="modal-icon" class="fa-solid fa-circle-exclamation"></i>
+                <span id="modal-title">標題</span>
+            </div>
+            <div class="p-6">
+                <p id="modal-content" class="text-gray-700 leading-relaxed text-sm md:text-base"></p>
+            </div>
+            <div id="modal-buttons" class="bg-gray-100 p-4 flex justify-end gap-3 border-t">
+                <!-- Buttons injected here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Game Data ---
+        const countries = [
+            // 非洲 (Africa)
+            {
+                id: "TCD", iso: "TCD", name: "乍得 (Chad) - 薩赫勒地區",
+                natural: "深居內陸的熱帶半乾旱氣候，年雨量極低且極不穩定。缺乏大型河流，土壤為貧瘠沙土，蒸散率極高，極易發生旱災與荒漠化。",
+                human: "經濟極度落後，貪污嚴重，時有地區衝突。農民完全依賴簡單工具與粗放式自給農業，極度缺乏資金、灌溉設施與化學肥料。",
+                baseMoney: 500, baseFood: 200, pop: 100, priceModifier: 1.5,
+                techCost: 5000, landCost: 100, yieldPotential: 0.4,
+                droughtRisk: 0.15, conflictRisk: 0.05, govtHelpChance: 0.1
+            },
+            {
+                id: "EGY", iso: "EGY", name: "埃及 (Egypt) - 尼羅河谷",
+                natural: "熱帶沙漠氣候，降雨極為稀少。農業高度依賴尼羅河沿岸灌溉。沿海與河谷地帶土壤相對肥沃，但面臨嚴重的土壤鹽化威脅。",
+                human: "中低收入國家，人口高度集中於河谷，農地極度緊缺。農業集約化程度高，但受限於水資源分配爭議與全球糧食市場價格波動。",
+                baseMoney: 3000, baseFood: 1500, pop: 300, priceModifier: 1.2,
+                techCost: 7000, landCost: 3000, yieldPotential: 2.0,
+                droughtRisk: 0.10, conflictRisk: 0.03, govtHelpChance: 0.3
+            },
+            // 亞洲 (Asia)
+            {
+                id: "IND", iso: "IND", name: "印度 (India) - 季風農業區",
+                natural: "熱帶季風氣候，雨熱同期。擁有多河流沖積平原，土壤相對肥沃。但降雨極度依賴季風，旱澇災害發生頻率極高。",
+                human: "發展中國家，人口密度極大，人均耕地狹小。以小農分散經營為主。近年綠色革命帶來化肥，但面臨地下水超抽與環境退化問題。",
+                baseMoney: 2000, baseFood: 1000, pop: 500, priceModifier: 1.0,
+                techCost: 8000, landCost: 1000, yieldPotential: 1.5,
+                droughtRisk: 0.1, conflictRisk: 0.02, govtHelpChance: 0.5
+            },
+            {
+                id: "JPN", iso: "JPN", name: "日本 (Japan) - 沿海多山區",
+                natural: "溫帶季風氣候，降水充沛。地形多山，平原狹小，耕地極度缺乏。常面臨颱風與地震等自然災害威脅。",
+                human: "高度發達經濟體。農業高度機械化、精緻化與高科技化(如溫室、精確農業)。但面臨農村人口嚴重老化、高度依賴糧食進口的困境。",
+                baseMoney: 12000, baseFood: 1000, pop: 120, priceModifier: 1.5,
+                techCost: 15000, landCost: 8000, yieldPotential: 2.5,
+                droughtRisk: 0.05, conflictRisk: 0.0, govtHelpChance: 0.9
+            },
+            // 歐洲 (Europe)
+            {
+                id: "FRA", iso: "FRA", name: "法國 (France) - 溫帶平原",
+                natural: "溫帶海洋性氣候為主，氣候溫和濕潤，年降水均勻。平原廣大，多棕壤與黑鈣土，非常適宜規模化農業發展。",
+                human: "發達國家。受歐盟共同農業政策(CAP)深度扶持。單位面積產量極高，高度重視精準水肥管理與綠色可持續標準，資本雄厚。",
+                baseMoney: 10000, baseFood: 4000, pop: 60, priceModifier: 1.0,
+                techCost: 12000, landCost: 4000, yieldPotential: 3.0,
+                droughtRisk: 0.03, conflictRisk: 0.0, govtHelpChance: 0.9
+            },
+            {
+                id: "UKR", iso: "UKR", name: "烏克蘭 (Ukraine) - 東歐黑土區",
+                natural: "溫帶大陸性氣候，擁有全球最肥沃的「黑鈣土」(Chernozem)，地形平坦廣闊，被譽為歐洲的糧倉。",
+                human: "中等收入國家，是全球主要穀物出口國之一。農場規模大，但近年飽受地緣政治與戰爭衝突破壞，基礎設施與物流嚴重受阻。",
+                baseMoney: 3000, baseFood: 5000, pop: 40, priceModifier: 0.8,
+                techCost: 6000, landCost: 800, yieldPotential: 2.8,
+                droughtRisk: 0.08, conflictRisk: 0.25, govtHelpChance: 0.4
+            },
+            // 北美洲 (North America)
+            {
+                id: "USA", iso: "USA", name: "美國 (USA) - 南加州農業區",
+                natural: "地中海與半乾旱氣候，夏季炎熱乾燥，自然降雨不足。但擁有中央谷地等平坦低地。面臨地下水枯竭與野火危機。",
+                human: "全球頂尖的現代規模商業農業。擁有龐大資本、高度機械化、精確農業(GPS、無人機)、基因改造技術及大型跨州調水工程。",
+                baseMoney: 15000, baseFood: 5000, pop: 100, priceModifier: 0.8,
+                techCost: 15000, landCost: 5000, yieldPotential: 3.5,
+                droughtRisk: 0.08, conflictRisk: 0.0, govtHelpChance: 0.8
+            },
+            {
+                id: "MEX", iso: "MEX", name: "墨西哥 (Mexico) - 中部高原",
+                natural: "氣候多樣，北部乾旱，中部與南部多山且降雨不均。面臨嚴重的氣候變遷影響、土壤侵蝕與水資源短缺問題。",
+                human: "新興工業國家。南北農業差異大：北部為出口導向的大型商業農場，南部多為自給自足的小農戶，農村基礎設施相對薄弱。",
+                baseMoney: 4000, baseFood: 2000, pop: 130, priceModifier: 1.0,
+                techCost: 8000, landCost: 1200, yieldPotential: 1.8,
+                droughtRisk: 0.12, conflictRisk: 0.05, govtHelpChance: 0.4
+            },
+            // 南美洲 (South America)
+            {
+                id: "BRA", iso: "BRA", name: "巴西 (Brazil) - 塞拉多稀樹草原",
+                natural: "熱帶稀樹草原氣候，光熱充足，降水充沛。原始土壤偏酸缺磷，但經大規模石灰改良後產能極高。",
+                human: "新興大宗出口型農業。大型私人農莊規模化經營。高度依賴化肥投入與跨國企業收購，主要瓶頸在於內陸物流基建及雨林砍伐爭議。",
+                baseMoney: 5000, baseFood: 3000, pop: 200, priceModifier: 0.9,
+                techCost: 10000, landCost: 500, yieldPotential: 2.5,
+                droughtRisk: 0.05, conflictRisk: 0.01, govtHelpChance: 0.4
+            },
+            {
+                id: "ARG", iso: "ARG", name: "阿根廷 (Argentina) - 潘帕斯草原",
+                natural: "溫帶氣候，氣候溫和，降水適中。擁有極其肥沃的潘帕斯(Pampas)大平原，是天然的優質農牧業生產區。",
+                human: "中高收入國家，農產品出口大國。機械化程度高，但長期受制於國內經濟動盪、高通貨膨脹與政府高額出口稅的限制。",
+                baseMoney: 4000, baseFood: 4000, pop: 45, priceModifier: 0.8,
+                techCost: 7000, landCost: 1000, yieldPotential: 2.6,
+                droughtRisk: 0.08, conflictRisk: 0.03, govtHelpChance: 0.3
+            },
+            // 大洋洲 (Oceania)
+            {
+                id: "AUS", iso: "AUS", name: "澳洲 (Australia) - 墨累-大令盆地",
+                natural: "大部分地區乾燥少雨，農業極度依賴墨累-大令水系灌溉。聖嬰現象(El Niño)頻繁帶來毀滅性的長期旱災。",
+                human: "發達國家。地廣人稀，農場規模極大。擁有世界領先的旱作農業與精確灌溉技術，但水資源分配（農業與環保）衝突激烈。",
+                baseMoney: 12000, baseFood: 3000, pop: 25, priceModifier: 0.9,
+                techCost: 12000, landCost: 1500, yieldPotential: 2.0,
+                droughtRisk: 0.20, conflictRisk: 0.0, govtHelpChance: 0.8
+            },
+            {
+                id: "PNG", iso: "PNG", name: "巴布亞新幾內亞 (PNG) - 熱帶島嶼",
+                natural: "熱帶雨林氣候，高溫多雨。地形崎嶇，多高山與密林，可耕平原狹小。時常面臨地震與火山等自然威脅。",
+                natural: "熱帶雨林氣候，高溫多雨。地形崎嶇，多高山與密林，可耕平原狹小。時常面臨地震與火山威脅。",
+                human: "欠發達國家。絕大多數人口依賴傳統的自給自足農業，部落文化濃厚。基礎設施極度缺乏，難以進行現代化商業農作。",
+                baseMoney: 800, baseFood: 500, pop: 10, priceModifier: 1.3,
+                techCost: 4000, landCost: 200, yieldPotential: 1.0,
+                droughtRisk: 0.05, conflictRisk: 0.10, govtHelpChance: 0.2
+            }
+        ];
+
+        // --- Game State ---
+        let state = {
+            country: null,
+            date: new Date('2026-01-01'),
+            money: 0,
+            food: 0,
+            hunger: 0, // 0-100%
+            techLevel: 1,
+            land: 10,
+            plantedCount: 0, // Growing crop progress
+            isPaused: true,
+            marketPrice: 100,
+            gameLoop: null
+        };
+
+        // --- Initialization ---
+        window.onload = function() {
+            initGame();
+            loadMap();
+        };
+
+        function loadMap() {
+            const width = document.getElementById('map-container').clientWidth;
+            const height = document.getElementById('map-container').clientHeight;
+            
+            const svg = d3.select("#map-container").append("svg")
+                .attr("viewBox", `0 0 ${width} ${height}`)
+                .attr("preserveAspectRatio", "xMidYMid meet");
+
+            const projection = d3.geoMercator()
+                .scale(width / 6.5)
+                .translate([width / 2, height / 1.5]);
+
+            const path = d3.geoPath().projection(projection);
+
+            // Fetch a lightweight GeoJSON world map
+            d3.json("https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson").then(function(data) {
+                document.getElementById('map-loading').style.display = 'none';
+                
+                svg.append("g")
+                    .selectAll("path")
+                    .data(data.features)
+                    .enter()
+                    .append("path")
+                    .attr("d", path)
+                    .attr("class", "country")
+                    .attr("id", d => "country-" + d.id)
+                    .on("mouseover", function(event, d) {
+                        d3.select(this).style("opacity", 0.8);
+                    })
+                    .on("mouseout", function(event, d) {
+                        d3.select(this).style("opacity", 1);
+                    });
+
+                highlightCountry(state.country.iso);
+                
+                // 延遲顯示歡迎彈窗，讓玩家先看到遊戲版面與地圖
+                setTimeout(() => {
+                    showWelcomeModal();
+                }, 1000);
+            }).catch(err => {
+                document.getElementById('map-loading').innerHTML = '<i class="fa-solid fa-triangle-exclamation text-red-500"></i> 地圖載入失敗，但遊戲仍可繼續。';
+                setTimeout(() => {
+                    showWelcomeModal();
+                }, 1000);
+            });
+        }
+
+        function highlightCountry(isoId) {
+            d3.selectAll(".country").classed("active", false);
+            const target = d3.select("#country-" + isoId);
+            if(!target.empty()) {
+                target.classed("active", true);
+            }
+        }
+
+        function initGame() {
+            // Randomly select country
+            state.country = countries[Math.floor(Math.random() * countries.length)];
+            
+            // Set initial stats
+            state.money = state.country.baseMoney;
+            state.food = state.country.baseFood;
+            state.marketPrice = Math.floor(100 * state.country.priceModifier);
+            
+            updateUI();
+            logEvent("系統正在為您配置隨機的起始國家...", "info");
+        }
+
+        function showWelcomeModal() {
+            showModal(
+                "🌍 歡迎來到《糧食大亨》",
+                `遊戲已為您隨機選擇了起始地點：<b>${state.country.name}</b>。<br><br>
+                請詳閱左側的自然與人文條件。您的目標是在 2030 年前存活下來，並盡可能擴張農業版圖，或解決當地的饑荒危機。<br><br>
+                <b>注意：</b>有些選擇在富裕國家是靈丹妙藥，在貧窮國家卻可能是加速破產的毒藥。`,
+                [{ text: "開始遊戲", style: "bg-green-600 text-white hover:bg-green-700", action: () => { togglePause(); logEvent(`您已就任 ${state.country.name} 的農業決策者！`, "success"); } }]
+            );
+        }
+
+        function updateUI() {
+            document.getElementById('country-name').innerText = state.country.name;
+            document.getElementById('country-natural').innerText = state.country.natural;
+            document.getElementById('country-human').innerText = state.country.human;
+            
+            document.getElementById('ui-date').innerText = state.date.toISOString().split('T')[0];
+            document.getElementById('ui-money').innerText = state.money.toLocaleString();
+            document.getElementById('ui-food').innerText = state.food.toLocaleString();
+            document.getElementById('ui-hunger').innerText = state.hunger;
+            document.getElementById('ui-price').innerText = `$${state.marketPrice}/噸`;
+            document.getElementById('ui-tech').innerText = `Lv ${state.techLevel}`;
+            document.getElementById('ui-land').innerText = `${state.land} 公頃`;
+
+            // Hunger color warning
+            const hungerEl = document.getElementById('ui-hunger');
+            if(state.hunger > 50) hungerEl.parentElement.classList.replace('bg-green-900', 'bg-red-800');
+            else hungerEl.parentElement.classList.replace('bg-red-800', 'bg-green-900');
+        }
+
+        function logEvent(msg, type="info") {
+            const logContainer = document.getElementById('log-container');
+            const entry = document.createElement('div');
+            entry.className = `log-entry p-2 rounded text-sm border-l-4 ${type === 'danger' ? 'border-red-500 bg-red-50' : type === 'success' ? 'border-green-500 bg-green-50' : type === 'warning' ? 'border-yellow-500 bg-yellow-50' : 'border-blue-500 bg-white'}`;
+            entry.innerHTML = `<span class="text-gray-500 text-xs">[${state.date.toISOString().split('T')[0]}]</span> ${msg}`;
+            logContainer.prepend(entry);
+            
+            // Keep only last 50 logs
+            if(logContainer.children.length > 50) {
+                logContainer.lastChild.remove();
+            }
+        }
+
+        function togglePause() {
+            state.isPaused = !state.isPaused;
+            const btn = document.getElementById('btn-pause');
+            if (state.isPaused) {
+                clearInterval(state.gameLoop);
+                btn.innerText = "▶ 恢復遊戲";
+                btn.classList.replace('bg-gray-200', 'bg-red-200');
+            } else {
+                state.gameLoop = setInterval(gameTick, 1000); // 1 real second = 1 game day
+                btn.innerText = "⏸ 暫停遊戲";
+                btn.classList.replace('bg-red-200', 'bg-gray-200');
+            }
+        }
+
+        function gameTick() {
+            // Advance time
+            state.date.setDate(state.date.getDate() + 1);
+            
+            // Consume food based on population (modified by country pop density)
+            const dailyConsumption = Math.ceil(state.country.pop * 0.1);
+            state.food -= dailyConsumption;
+
+            // Update hunger
+            if (state.food < 0) {
+                state.food = 0;
+                state.hunger += 2;
+                if(state.hunger > 100) state.hunger = 100;
+            } else {
+                state.hunger -= 1;
+                if(state.hunger < 0) state.hunger = 0;
+            }
+
+            // Crop growth
+            if (state.plantedCount > 0) {
+                state.plantedCount++;
+                if (state.plantedCount > 60) { // 60 days to harvest
+                    logEvent("🌾 田裡的作物已經成熟，請盡快收割！", "success");
+                    state.plantedCount = -1; // Ready to harvest
+                }
+            }
+
+            // Market fluctuations
+            if (Math.random() < 0.1) {
+                const fluctuation = Math.floor(Math.random() * 21) - 10; // -10 to +10
+                state.marketPrice = Math.max(10, state.marketPrice + fluctuation);
+            }
+
+            // Random Events
+            checkRandomEvents();
+
+            updateUI();
+            checkEndGame();
+        }
+
+        function checkRandomEvents() {
+            const rand = Math.random();
+            
+            // Drought
+            if (rand < (state.country.droughtRisk / 30)) { // Daily probability
+                togglePause();
+                let damageMsg = "作物受到嚴重損害！";
+                if(state.techLevel > 2) {
+                    damageMsg = "但您的現代化灌溉設施減輕了損失。";
+                    state.plantedCount = Math.max(1, state.plantedCount - 5);
+                } else {
+                    state.plantedCount = 0; // Crops die
+                }
+                showModal("☀️ 嚴重旱災", `持續的高溫與乾旱侵襲了 ${state.country.name}。<br>${damageMsg}<br>這就是大自然對農業的限制。`, [{text: "確認", style: "bg-blue-600 text-white", action: togglePause}]);
+                logEvent("發生嚴重旱災。", "danger");
+            }
+
+            // Conflict
+            else if (rand < (state.country.conflictRisk / 30)) {
+                togglePause();
+                let moneyLoss = Math.floor(state.money * 0.2);
+                state.money -= moneyLoss;
+                state.land = Math.max(5, state.land - 2);
+                showModal("⚔️ 地區衝突", `武裝衝突爆發，農田遭到破壞，農民被迫流離失所。<br>您損失了 $${moneyLoss} 與部分農田。<br>政治不穩定是農業發展的致命傷。`, [{text: "無奈接受", style: "bg-red-600 text-white", action: togglePause}]);
+                logEvent("地區衝突導致農業停擺。", "danger");
+            }
+        }
+
+        function playerAction(action) {
+            if(state.isPaused && action !== 'sell') {
+                logEvent("請先恢復遊戲時間再進行操作。", "warning");
+                return;
+            }
+
+            switch(action) {
+                case 'plant':
+                    if (state.plantedCount !== 0) {
+                        logEvent("田裡已經有作物或等待收割中。", "warning");
+                        return;
+                    }
+                    const plantCost = state.land * 10;
+                    if (state.money >= plantCost) {
+                        state.money -= plantCost;
+                        state.plantedCount = 1;
+                        logEvent(`花費 $${plantCost} 播種作物。祈求風調雨順。`, "info");
+                    } else {
+                        logEvent("資金不足以播種。", "danger");
+                    }
+                    break;
+                
+                case 'irrigate':
+                    const irrCost = state.land * 20 * state.techLevel;
+                    if (state.money >= irrCost) {
+                        state.money -= irrCost;
+                        // Increases yield potential temporarily
+                        state.country.yieldPotential += 0.2;
+                        logEvent(`花費 $${irrCost} 投入化肥與灌溉。土壤肥力暫時提升。`, "success");
+                    } else {
+                        logEvent("資金不足以購買農業投入品。", "danger");
+                    }
+                    break;
+
+                case 'tech':
+                    if (state.money >= state.country.techCost) {
+                        state.money -= state.country.techCost;
+                        state.techLevel++;
+                        state.country.techCost = Math.floor(state.country.techCost * 1.5);
+                        state.country.yieldPotential += 0.5;
+                        logEvent(`研發成功！農業科技升至 Lv ${state.techLevel}。`, "success");
+                    } else {
+                        logEvent(`升級技術需要 $${state.country.techCost}。`, "danger");
+                    }
+                    break;
+
+                case 'harvest':
+                    if (state.plantedCount === -1) {
+                        // Yield calculation based on land, tech, and natural potential
+                        let yieldBase = state.land * 50 * state.country.yieldPotential * (1 + (state.techLevel * 0.1));
+                        let finalYield = Math.floor(yieldBase);
+                        
+                        state.food += finalYield;
+                        state.plantedCount = 0;
+                        logEvent(`🌾 收割完成！獲得 ${finalYield} 噸糧食。`, "success");
+                    } else if (state.plantedCount > 0) {
+                        logEvent("作物尚未成熟！", "warning");
+                    } else {
+                        logEvent("田裡沒有作物可收割。", "warning");
+                    }
+                    break;
+
+                case 'expand':
+                    if (state.money >= state.country.landCost) {
+                        state.money -= state.country.landCost;
+                        state.land += 10;
+                        state.country.landCost = Math.floor(state.country.landCost * 1.2); // land gets more expensive
+                        logEvent(`開墾/購買新農田，總面積達 ${state.land} 公頃。`, "info");
+                        
+                        if(state.country.id === "TCD") {
+                            logEvent("注意：在邊際土地擴張可能加劇荒漠化。", "warning");
+                        }
+                    } else {
+                        logEvent(`擴張需要 $${state.country.landCost}。`, "danger");
+                    }
+                    break;
+
+                case 'sell':
+                    if (state.food >= 100) {
+                        state.food -= 100;
+                        state.money += state.marketPrice;
+                        logEvent(`以 $${state.marketPrice} 售出 100 噸糧食。`, "success");
+                    } else {
+                        logEvent("儲糧不足 100 噸，無法大量銷售。", "warning");
+                    }
+                    break;
+
+                case 'corporate':
+                    if(state.land < 50) {
+                        logEvent("農田面積太小，跨國企業不感興趣。", "warning");
+                        return;
+                    }
+                    togglePause();
+                    showModal("🤝 跨國企業併購", 
+                        "跨國農企提出合作：他們將注資 $50,000，並提供高級種子與化肥。但未來 50% 的產量必須無償上繳，且您將喪失部分土地自主權。<br>這在南美或非洲很常見。",
+                        [
+                            {text: "拒絕", style: "bg-gray-400 text-white", action: togglePause},
+                            {text: "簽署協議", style: "bg-red-600 text-white", action: () => {
+                                state.money += 50000;
+                                state.techLevel += 2;
+                                state.country.yieldPotential *= 0.5; // Representing taking half yield
+                                togglePause();
+                                logEvent("已簽署企業合約。短期資金充裕，長期受制於人。", "warning");
+                            }}
+                        ]
+                    );
+                    break;
+
+                case 'aid':
+                    if(Math.random() < state.country.govtHelpChance) {
+                        const aidMoney = Math.floor(Math.random() * 2000) + 500;
+                        const aidFood = Math.floor(Math.random() * 1000) + 200;
+                        state.money += aidMoney;
+                        state.food += aidFood;
+                        logEvent(`獲得國際/政府援助：$${aidMoney} 及 ${aidFood}噸 糧食。`, "success");
+                    } else {
+                        let reason = state.country.id === "USA" ? "政府認為您是商業農場，無須過度補貼。" : "政府貪污嚴重或基建落後，救援物資無法送達。";
+                        logEvent(`援助請求失敗。${reason}`, "danger");
+                    }
+                    break;
+            }
+            updateUI();
+        }
+
+        function checkEndGame() {
+            // Starvation Ending
+            if (state.hunger >= 100) {
+                clearInterval(state.gameLoop);
+                showModal("💀 結局：饑荒蔓延", 
+                    `在 ${state.country.name}，惡劣的自然條件與落後的人文投入最終無法養活人民。<br><br><b>這不是您單方面的錯。</b> 在缺乏資金、基建與穩定政局的欠發達國家，單靠農民的選擇難以對抗天災與貧窮的惡性循環。<br>聯合國FAO指出，消滅饑荒需打破貧窮循環、提供教育與技術。`,
+                    [
+                        {text: "重新開始", style: "bg-blue-600 text-white", action: () => location.reload()},
+                        {text: "<i class='fa-solid fa-share-nodes'></i> 分享結局", style: "bg-indigo-600 text-white", keepOpen: true, action: (e) => shareResult("💀 饑荒蔓延", e.currentTarget) }
+                    ]
+                );
+            }
+            
+            // Tycoon Ending
+            if (state.money >= 500000) {
+                clearInterval(state.gameLoop);
+                showModal("🏆 結局：全球糧食大亨", 
+                    `憑藉雄厚的資本與高科技投入，您在 ${state.country.name} 建立龐大的農業帝國！<br><br>您證明了<b>人文投入(資本、科技、基建)可以克服自然環境的限制</b>。就像南加州的灌溉農業或荷蘭的溫室農業一樣。<br>但請思考：過度依賴化肥與超抽地下水，是否符合可持續農業的原則？`,
+                    [
+                        {text: "重新開始", style: "bg-blue-600 text-white", action: () => location.reload()},
+                        {text: "<i class='fa-solid fa-share-nodes'></i> 分享結局", style: "bg-indigo-600 text-white", keepOpen: true, action: (e) => shareResult("🏆 全球糧食大亨", e.currentTarget) }
+                    ]
+                );
+            }
+
+            // Time Up (2030) - Subsistence
+            if (state.date.getFullYear() >= 2030) {
+                clearInterval(state.gameLoop);
+                showModal("⚖️ 結局：餬口一生", 
+                    `時間來到 2030 年。您在 ${state.country.name} 努力耕耘，勉強維持了溫飽，但未能擴大生產。<br><br>這是全球多數小農的縮影。雖然努力，但受限於<b>土地承載力</b>、市場波動與氣候變遷。要達到真正的糧食安全，我們還需要推廣可持續農業、改善農村基建與開拓收入來源。`,
+                    [
+                        {text: "重新開始", style: "bg-blue-600 text-white", action: () => location.reload()},
+                        {text: "<i class='fa-solid fa-share-nodes'></i> 分享結局", style: "bg-indigo-600 text-white", keepOpen: true, action: (e) => shareResult("⚖️ 餬口一生", e.currentTarget) }
+                    ]
+                );
+            }
+        }
+
+        function shareResult(endingTitle, btnElement) {
+            const text = `我在《糧食大亨》中擔任了 ${state.country.name} 的農業決策者。\n最終結局：${endingTitle}！\n\n各國自然與人文條件大不同，你能克服挑戰嗎？快來體驗真實的農業困境！`;
+            if (navigator.share) {
+                navigator.share({
+                    title: '糧食大亨 - 結局分享',
+                    text: text
+                }).catch(err => console.log("分享已取消或失敗", err));
+            } else {
+                // 不支援 Web Share API 時自動複製到剪貼簿 (Fallback)
+                const el = document.createElement('textarea');
+                el.value = text;
+                document.body.appendChild(el);
+                el.select();
+                document.execCommand('copy');
+                document.body.removeChild(el);
+                
+                if (btnElement) {
+                    const originalText = btnElement.innerHTML;
+                    btnElement.innerHTML = "<i class='fa-solid fa-check'></i> 內容已複製！";
+                    setTimeout(() => { btnElement.innerHTML = originalText; }, 2500);
+                }
+            }
+        }
+
+        function showModal(title, content, buttons) {
+            document.getElementById('modal-title').innerHTML = title;
+            document.getElementById('modal-content').innerHTML = content;
+            
+            const btnContainer = document.getElementById('modal-buttons');
+            btnContainer.innerHTML = ''; // clear existing
+            
+            buttons.forEach(btn => {
+                const button = document.createElement('button');
+                button.className = `px-4 py-2 rounded font-bold transition ${btn.style}`;
+                button.innerHTML = btn.text;
+                button.onclick = (e) => {
+                    if (!btn.keepOpen) {
+                        document.getElementById('custom-modal').classList.add('hidden');
+                    }
+                    if(btn.action) btn.action(e);
+                };
+                btnContainer.appendChild(button);
+            });
+
+            document.getElementById('custom-modal').classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
